@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orgdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: golang:1.21-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    environment:
+      CGO_ENABLED: 0
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /tmp/up
+        cp /migrations/*.up.sql /tmp/up/
+        go install github.com/pressly/goose/v3/cmd/goose@v3.14.0
+        goose -dir /tmp/up postgres "host=postgres user=postgres password=postgres dbname=orgdb port=5432 sslmode=disable" up
+    restart: on-failure
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: orgdb
+      MAX_DEPTH: 5
+    restart: on-failure
+
+volumes:
+  postgres_data:
